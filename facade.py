@@ -9,10 +9,12 @@ from observer import DefaultObserver
 from result import IResult
 from server import IServer
 from service import IService
-from storage import IHaveStorage, IStorage
+from storage import IHaveStorage, IStorageFacade, IHaveStorageFacade
+from subject import ISubject
 
 
 def distribution_between_consumers(src, target):
+    """ SRC distribution between TARGET """
     count_devices = len(src)
     count_services = len(target)
     remains = count_devices % count_services
@@ -35,7 +37,7 @@ class IFacade(ABC):
         pass
 
     @abstractmethod
-    def add_service(self, service: IService):
+    def add_service(self, service: IService or List[IService]):
         pass
 
     @abstractmethod
@@ -43,7 +45,7 @@ class IFacade(ABC):
         pass
 
     @abstractmethod
-    def add_server(self, server: IServer):
+    def add_server(self, server: IServer or List[IServer]):
         pass
 
     @abstractmethod
@@ -86,50 +88,81 @@ class DefaultHaveDevice(IHaveDevice):
         self._device.remove(device)
 
 
-class NetworkMonitoringFacade(IFacade, IHaveDevice, DefaultObserver, IHaveStorage):
+class NetworkMonitoringFacade(IFacade, IHaveDevice, DefaultObserver, IHaveStorageFacade):
+
+    def set_storage_facade(self, storage_facade: IStorageFacade):
+        self._storage_facade = storage_facade
+        return self
+
+    def get_storage_facade(self) -> IStorageFacade:
+        return self._storage_facade
 
     async def start_servers(self):
         logger.info('Сервера запущены')
         await asyncio.gather(server.start() for server in self._servers)
 
+    def add_service(self, service: Union[IService, List[IService]]):
+        storage_facade = self.get_storage_facade()
+        if isinstance(service, IService):
+            services = [service]
+        elif isinstance(service, list):
+            services = service
+        else:
+            raise TypeError(IService or List[IService])
 
-    def add_service(self, service: IService):
-        self._services.append(service)
+        for _service in services:
+            if isinstance(_service, IHaveStorage):
+                _service.set_storage(storage_facade.storage)
+            if isinstance(_service, ISubject):
+                _service.attach(storage_facade.observer)
+            self._services.append(_service)
 
     def del_service(self, service: IService):
         self._services.remove(service)
 
-    def add_server(self, server: IServer):
-        self._servers.append(server)
+    def add_server(self, server: IServer or List[IServer]):
+        if isinstance(server, IServer):
+            servers = [server]
+        elif isinstance(server, list):
+            servers = server
+        else:
+            raise TypeError(IServer or List[IServer])
+
+        storage_facade = self.get_storage_facade()
+        for _server in servers:
+            if isinstance(_server, IHaveStorage):
+                _server.set_storage(storage_facade.storage)
+            if isinstance(_server, ISubject):
+                _server.attach(storage_facade.observer)
+            self._servers.append(_server)
 
     def del_server(self, server: IServer):
         self._servers.remove(server)
 
-    def add_device(self, device: str):
-        self._device.append(device)
+    def add_device(self, device: Union[str, List[str]]):
+        if isinstance(device, str):
+            device = [device]
+        for _device in device:
+            self._device.append(_device)
+        return self
 
     def del_device(self, device: str):
         self._device.remove(device)
-
-    def set_storage(self, storage: IStorage):
-        self._storage = storage
-
-    def get_storage(self) -> IStorage:
-        return self._storage
 
     def __init__(self, **kwargs):
         super(DefaultObserver, self).__init__()
         self._services: List[IService] = list()
         self._servers: List[IServer] = list()
         self._device = list()
-        self._storage: IStorage = kwargs.get('storage')
+        self._storage_facade = kwargs.get('storage_facade')
 
     def update(self, result: Union[IResult, List[IResult]]) -> None:
+        storage_facade = self.get_storage_facade()
         if isinstance(result, list):
             for res in result:
-                self.get_storage().add_data(res.get())
+                storage_facade.storage.add_data(res.get())
         elif isinstance(result, IResult):
-            self.get_storage().add_data(result.get())
+            storage_facade.storage.add_data(result.get())
 
     async def start_services(self):
         services: Tuple[IHaveDevice] = (*filter(lambda d: isinstance(d, IHaveDevice), self._services),)

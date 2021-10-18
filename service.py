@@ -1,14 +1,15 @@
 import asyncio
 from abc import ABC, abstractmethod
 from typing import Union, List, Tuple
+import datetime
 
-from icmplib import async_ping, async_multiping
+from icmplib import async_multiping
 
 from device import IHaveDevice
-from result import IResult, IHaveResult
-from status import IStatus
-from storage import IStorage
-from subject import DefaultSubject
+from result import IResult
+from status import IStatus, StopStatus, StartStatus, RestartStatus
+from storage.storage import IStorage, IHaveStorage
+from subject import DefaultSubjectFacade
 
 
 class IHaseTimeout(ABC):
@@ -42,6 +43,11 @@ class DefaultHaseTimeout(IHaseTimeout):
 
 
 class IService(ABC):
+    @property
+    @abstractmethod
+    def name(self):
+        pass
+
     @abstractmethod
     async def start(self, *args, **kwarg) -> IResult:
         pass
@@ -52,10 +58,6 @@ class IService(ABC):
 
     @abstractmethod
     async def restart(self):
-        pass
-
-    @abstractmethod
-    def get_name(self):
         pass
 
     @abstractmethod
@@ -79,18 +81,23 @@ class IService(ABC):
         pass
 
 
-class DefaultService(IService, DefaultSubject, DefaultHaseTimeout):
+class DefaultServiceFacade(IService, DefaultSubjectFacade, DefaultHaseTimeout):
+    def __init__(self, **kwargs):
+        self._name = kwargs.get('name', 'Default')
+        self._result: IResult = kwargs.get('result')
+        self._status_start: IStatus = StopStatus()
+        self._status_stop: IStatus = StartStatus()
+        self._status_restart: IStatus = RestartStatus()
+        self._timeout: float = kwargs.get('timeout', 10.0)
+        super().__init__(**kwargs)
+
     @abstractmethod
     async def _work(self, *args, **kwargs):
         pass
 
-    def __init__(self, **kwargs):
-        self._name = kwargs.get('name', 'Default')
-        self._result: IResult = kwargs.get('result')
-        self._status_start: IStatus = kwargs.get('status_start')
-        self._status_stop: IStatus = kwargs.get('status_stop')
-        self._status_restart: IStatus = kwargs.get('status_restart')
-        super().__init__(**kwargs)
+    @property
+    def name(self):
+        return self._name
 
     def set_status_start(self, status: IStatus) -> IService:
         self._status_start = status
@@ -128,42 +135,58 @@ class DefaultService(IService, DefaultSubject, DefaultHaseTimeout):
         await self.stop()
         await self.start(**kwargs)
 
+    @property
+    def timeout(self):
+        return self._timeout
 
-class SearchDeviceService(DefaultService, IHaveDevice):
+
+class SearchDeviceService(DefaultServiceFacade, IHaveDevice):
+    def __init__(self, **kwargs):
+        self._devices: Union[List, Tuple] = kwargs.pop('devices', list())
+        super().__init__(name='NetworkManager', **kwargs)
+
     def add_device(self, device: str):
         self._devices.append(device)
 
     def del_device(self, device: str):
         self._devices.remove(device)
 
-    @property
-    def timeout(self):
-        return self._timeout
-
-    def __init__(self, **kwarg):
-        self._devices: Union[List, Tuple] = kwarg.pop('devices', list())
-        self._timeout: float = kwarg.get('timeout', 10.0)
-        super().__init__(**kwarg)
-
     async def _work(self, *args, **kwargs):
         if isinstance(self._devices, tuple):
             self._devices = list(self._devices)
-        result = await async_multiping(self._devices)
-        results = dict()
-        for result_ping in result:
-            results.update({result_ping.address: result_ping.is_alive})
-        self.set_result(self._result.set(results))
-        await self.sleep()
+        try:
+            results_raw = await async_multiping(self._devices)
+            raw_date = datetime.datetime.now()
+            date = f'{raw_date.day}.{raw_date.month}.{raw_date.year} {raw_date.hour}.{raw_date.minute}'
+            results_final = {self.name: {date: dict()}}
+            results_final_with_name = results_final[self.name]
+            results_final_with_name_with_date = results_final_with_name[date]
+
+            for result_ping in results_raw:
+                results_final_with_name_with_date.update({result_ping.address: result_ping.is_alive})
+            self.set_result(results_final)
+            await self.sleep()
+        except ValueError:
+            await asyncio.sleep(30)
 
 
-class PrintService(DefaultService):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._storage: IStorage = kwargs.pop('storage')
+class PrintService(DefaultServiceFacade, IHaveStorage):
+    def __init__(self, storage=None, **kwargs):
+        super().__init__(name='PrintService', **kwargs)
+        self._storage: IStorage = storage
         self._timeout: float = kwargs.get('timeout', 60.0)
 
+    def set_storage(self, storage: IStorage) -> IService and IHaveStorage:
+        self._storage = storage
+        return self
+
+    def get_storage(self) -> IStorage:
+        return self._storage
+
     async def _work(self, *args, **kwargs):
-        print(self._storage.get_data())
+        data = self._storage.get_data()
+        if len(data) != 0:
+            print(data)
         await self.sleep()
 
     async def work(self, *args, **kwargs):
@@ -172,7 +195,3 @@ class PrintService(DefaultService):
                 await self._work(*args, **kwargs)
             except TypeError:
                 pass
-
-    @property
-    def timeout(self):
-        return self._timeout

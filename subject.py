@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import List
 
+from loguru import logger
+
 from observer import IObserver
 from result import IResult, IHaveResult
 
@@ -19,7 +21,7 @@ class ISubject(ABC):
         pass
 
 
-class DefaultSubject(ISubject, IHaveResult):
+class DefaultSubjectFacade(ISubject, IHaveResult):
     def set_result(self, value):
         if isinstance(value, IResult):
             self._result.set(value.get())

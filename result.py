@@ -27,7 +27,16 @@ class DefaultResult(IResult):
         self._result = kwargs.get('data')
 
     def set(self, value) -> IResult:
-        self._result = value
+        if isinstance(self._result, dict) and isinstance(value, dict):
+            self._result.update(value)
+        elif isinstance(self._result, dict) and isinstance(value, str):
+            self._result.update(json.loads(value))
+        elif isinstance(self._result, list) and isinstance(value, list):
+            self._result += value
+        elif isinstance(self._result, str) and isinstance(value, str):
+            self._result = value
+        elif self._result is None:
+            self._result = value
         return self
 
     def get(self):
@@ -68,3 +77,15 @@ class DictResult(DefaultResult):
         else:
             result['data'] = self._result
         return result
+
+
+class IHaveJSONResult(ABC):
+    @abstractmethod
+    def get_data_json(self):
+        pass
+
+
+class IHaveHTMLResult(ABC):
+    @abstractmethod
+    def get_data_html(self):
+        pass
