@@ -1,4 +1,3 @@
-import asyncio
 import os
 from abc import ABC, abstractmethod
 
@@ -7,9 +6,9 @@ import jinja2
 from aiohttp import web
 from loguru import logger
 
-from result import IHaveJSONResult, IHaveHTMLResult
-from route import IHaveHTTPRoute, IHaveAPIRoute, APIHaveRoute, HTTPHaveRoute, DefaultRoute
-from routes import api_route
+import routes
+from route import IHaveHTTPRoute, IHaveAPIRoute, APIHaveRoute, HTTPHaveRoute
+from routes import router
 from service import DefaultServiceFacade
 from storage import IHaveStorage, IStorage
 
@@ -60,7 +59,7 @@ class DefaultRRFacade(IRRFacade):
         return self._data
 
 
-class HTTPServer(DefaultServer, IHaveHTTPRoute, IHaveAPIRoute, IRRFacade):
+class HTTPServer(DefaultServer, IHaveHTTPRoute, IHaveAPIRoute):
 
     def __init__(self, **kwargs):
         super().__init__(name='HTTP Server', **kwargs)
@@ -73,12 +72,20 @@ class HTTPServer(DefaultServer, IHaveHTTPRoute, IHaveAPIRoute, IRRFacade):
             self.app, loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                                   'templates'))
         )
-        for route in self._api.get_routes():
-            self.app.add_routes([web.get(route.full_route, route.handle)])
-            self.app.add_routes([web.get(route.full_route + '/{value}', route.handle)])
-        for route in self._http.get_routes():
-            self.app.add_routes([web.get(route.full_route, route.handle)])
-            self.app.add_routes([web.get(route.full_route + '/{value}', route.handle)])
+        # for route in [*self._api.get_routes(), *self._http.get_routes()]:
+        #     self.app.add_routes([web.get(route.full_route, route.handle)])
+        #     full_route_oblique_value = route.full_route + '/{value}'
+        #     full_route_value = route.full_route + '{value}'
+        #     for value_ in range(1, 5):
+        #         self.app.router.add_route('GET', full_route_oblique_value, route.handle)
+        #         self.app.router.add_route('GET', full_route_value, route.handle)
+        #         full_route_oblique_value += '/{value' + str(value_) + '}'
+        #         full_route_value += '/{value' + str(value_) + '}'
+        self.app.router.add_routes(router)
+        # for route in self._http.get_routes():
+        #     self.app.add_routes([web.get(route.full_route, route.handle)])
+        #     self.app.add_routes([web.get(route.full_route + '/{value}', route.handle)])
+        #     self.app.add_routes([web.get(route.full_route + '{value}', route.handle)])
 
     def set_storage(self, storage: IStorage) -> IServer and IHaveStorage:
         self._storage = storage
@@ -86,12 +93,6 @@ class HTTPServer(DefaultServer, IHaveHTTPRoute, IHaveAPIRoute, IRRFacade):
 
     def get_storage(self) -> IStorage:
         return self._storage
-
-    def request(self, value):
-        pass
-
-    def response(self):
-        pass
 
     @property
     def http(self) -> HTTPHaveRoute:
@@ -106,35 +107,8 @@ class HTTPServer(DefaultServer, IHaveHTTPRoute, IHaveAPIRoute, IRRFacade):
 
     async def work(self, *args, **kwargs):
         runner_ = web.AppRunner(self.app)
-
         await runner_.setup()
-        site_ = web.TCPSite(runner_, '127.0.0.1', self._port)
+        site_ = web.TCPSite(runner_, self._host, self._port)
         await site_.start()
-        logger.info(f"Serving up app on 127.0.0.1:{self._port}")
+        logger.info(f"Serving up app on {self._host}:{self._port}")
         return runner_, site_
-
-    # @api_route.decorator(['w', 'r'])
-    # async def handle(self, request):
-    #     # value = request.match_info.get('value', "Not set value")
-    #     # text = value
-    #     try:
-    #         storage = self.get_storage()
-    #         if isinstance(storage, IHaveJSONResult):
-    #             return web.Response(text=storage.get_data_json())
-    #         elif isinstance(storage, IHaveHTMLResult):
-    #             return web.Response(text=str(storage.get_data_html()),
-    #                                 content_type='text/html')
-    #         else:
-    #             return web.Response(text=str(storage.get_data()))
-    #     except AttributeError as ar:
-    #         return web.Response(text='ERR 404 = ' + str(ar))
-
-# if __name__ == '__main__':
-#     routes = [DefaultRoute(path=[f'aaa{i}', f'ddd{i}', f'fff{i}']) for i in range(13)]
-#     http_server = HTTPServer(api=APIHaveRoute(routes=routes))
-#     loop = asyncio.get_event_loop()
-#     runner, site = loop.run_until_complete(http_server.work())
-#     try:
-#         loop.run_forever()
-#     except KeyboardInterrupt as err:
-#         loop.run_until_complete(runner.cleanup())

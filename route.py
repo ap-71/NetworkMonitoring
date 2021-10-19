@@ -217,7 +217,7 @@ class HTTPHaveRoute(DefaultHaveRoute, IDecorator):
         self._prefix = kwargs.get('prefix', '')
         super().__init__(prefix=self._prefix, **kwargs)
 
-    def decorator(self, path):
+    def decorator(self, path=''):
         def decorator_(func):
             def wrapper():
                 route = HTTPRoute(prefix=self._prefix, path=path)

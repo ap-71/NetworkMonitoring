@@ -67,8 +67,22 @@ class RAMMemoryStorage(IStorage, IHaveJSONResult):
         self._storage.__delitem__(key)
 
     def get_data(self, key=None) -> Union[dict, Any]:
+        try:
+            key = key.replace('\'', '')
+        except AttributeError:
+            pass
         if key is not None:
-            return self._storage.get(key)
+            def find_key(key_, collection: dict):
+                for k, v in collection.items():
+                    result = None
+                    if k == key_:
+                        return v
+                    elif isinstance(v, dict):
+                        result = find_key(key_, v)
+                    if result is not None:
+                        return result
+
+            return find_key(key, self._storage)
         else:
             return self._storage
 
